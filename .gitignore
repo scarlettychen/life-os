@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# LifeOS local data
+data/
+*.db
+*.sqlite3
