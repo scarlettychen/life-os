@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api, qk, type CompleteTaskBody } from "@/lib/lifeos-api";
+import { formatMessageDates, fmtTime } from "@/lib/format";
 import { AppShell } from "@/components/lifeos/app-shell";
 import { QueryState } from "@/components/lifeos/query-state";
 import { Button } from "@/components/ui/button";
@@ -22,24 +23,33 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
+const NOW_LIMIT = 5;
+const REST_HOURS = 3;
+
 function Dashboard() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [limit, setLimit] = useState(5);
-  const [restHours, setRestHours] = useState(3);
+  const [loaded, setLoaded] = useState(false);
 
   const now = useQuery({
-    queryKey: qk.now(limit),
-    queryFn: () => api.getNow(limit),
+    queryKey: qk.now(NOW_LIMIT),
+    queryFn: () => api.getNow(NOW_LIMIT),
+    enabled: loaded,
   });
-  const plan = useQuery({ queryKey: qk.plan, queryFn: () => api.getPlan() });
+  const plan = useQuery({
+    queryKey: qk.plan,
+    queryFn: () => api.getPlan(),
+    enabled: loaded,
+  });
   const rest = useQuery({
-    queryKey: qk.rest(restHours),
-    queryFn: () => api.getRest(restHours),
+    queryKey: qk.rest(REST_HOURS),
+    queryFn: () => api.getRest(REST_HOURS),
+    enabled: loaded,
   });
   const calibration = useQuery({
     queryKey: qk.calibration,
     queryFn: () => api.getCalibration(),
+    enabled: loaded,
   });
 
   const sync = useMutation({
@@ -53,11 +63,25 @@ function Dashboard() {
 
   const [completeFor, setCompleteFor] = useState<{ id: number; title: string } | null>(null);
 
+  const refreshAll = () => {
+    setLoaded(true);
+    void now.refetch();
+    void plan.refetch();
+    void rest.refetch();
+    void calibration.refetch();
+  };
+
   return (
     <AppShell>
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <h1 className="text-2xl font-semibold mr-auto">Dashboard</h1>
-        <Button variant="outline" onClick={() => router.invalidate()}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            refreshAll();
+            router.invalidate();
+          }}
+        >
           Refresh
         </Button>
         <Button
@@ -69,28 +93,19 @@ function Dashboard() {
         </Button>
       </div>
 
+      {!loaded ? (
+        <p className="text-sm text-muted-foreground py-8">
+          Click Refresh to load your dashboard.
+        </p>
+      ) : (
       <div className="grid gap-6 lg:grid-cols-2">
         {/* NOW */}
         <Card>
-          <CardHeader className="flex flex-row items-center gap-2 justify-between">
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>What to work on now</CardTitle>
-            <div className="flex items-center gap-2 text-sm">
-              <Label htmlFor="limit">Limit</Label>
-              <Input
-                id="limit"
-                type="number"
-                min={1}
-                max={50}
-                value={limit}
-                onChange={(e) =>
-                  setLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
-                }
-                className="w-20"
-              />
-              <Button size="sm" variant="secondary" onClick={() => now.refetch()}>
-                Refresh
-              </Button>
-            </div>
+            <Button size="sm" variant="secondary" onClick={() => now.refetch()}>
+              Refresh
+            </Button>
           </CardHeader>
           <CardContent>
             <QueryState
@@ -105,7 +120,9 @@ function Dashboard() {
                     <div className="border rounded-md p-3 bg-accent/30">
                       <div className="text-xs text-muted-foreground">Top pick</div>
                       <div className="font-medium">{now.data.top_pick.title}</div>
-                      <ScoreLine breakdown={now.data.top_pick.breakdown} score={now.data.top_pick.score} />
+                      <div className="text-xs text-muted-foreground mt-1">
+                        score {now.data.top_pick.score.toFixed(2)}
+                      </div>
                       <Button
                         size="sm"
                         className="mt-2"
@@ -135,7 +152,6 @@ function Dashboard() {
                               score {r.score.toFixed(2)}
                             </span>
                           </div>
-                          <ScoreLine breakdown={r.breakdown} score={r.score} />
                         </li>
                       ))}
                     </ul>
@@ -172,15 +188,12 @@ function Dashboard() {
                   <ul className="divide-y border rounded-md">
                     {plan.data.blocks.map((b, i) => (
                       <li key={i} className="p-3 text-sm flex flex-wrap gap-2">
-                        <span className="font-mono text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {fmtTime(b.start)}–{fmtTime(b.end)}
                         </span>
                         <span className="font-medium">{b.title}</span>
                         <Badge variant="outline">{b.kind}</Badge>
                         <Badge variant="secondary">{b.status}</Badge>
-                        <span className="ml-auto text-muted-foreground">
-                          fit {b.energy_fit.toFixed(2)}
-                        </span>
                         <div className="w-full text-xs text-muted-foreground">
                           {b.rationale}
                         </div>
@@ -207,25 +220,11 @@ function Dashboard() {
 
         {/* REST */}
         <Card>
-          <CardHeader className="flex flex-row items-center gap-2 justify-between">
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Rest check</CardTitle>
-            <div className="flex items-center gap-2 text-sm">
-              <Label htmlFor="hrs">Hours</Label>
-              <Input
-                id="hrs"
-                type="number"
-                min={0.5}
-                step={0.5}
-                value={restHours}
-                onChange={(e) =>
-                  setRestHours(Math.max(0.5, Number(e.target.value) || 0.5))
-                }
-                className="w-20"
-              />
-              <Button size="sm" variant="secondary" onClick={() => rest.refetch()}>
-                Check
-              </Button>
-            </div>
+            <Button size="sm" variant="secondary" onClick={() => rest.refetch()}>
+              Check
+            </Button>
           </CardHeader>
           <CardContent>
             <QueryState isLoading={rest.isLoading} error={rest.error}>
@@ -293,45 +292,14 @@ function Dashboard() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       <CompleteTaskDialog
         target={completeFor}
         onOpenChange={(o) => !o && setCompleteFor(null)}
+        simple
       />
     </AppShell>
-  );
-}
-
-function fmtTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function ScoreLine({
-  breakdown,
-  score,
-}: {
-  breakdown: import("@/lib/lifeos-api").ScoreBreakdown;
-  score: number;
-}) {
-  return (
-    <div className="text-xs text-muted-foreground mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-3">
-      <span>total {score.toFixed(2)}</span>
-      <span>urgency {breakdown.urgency.toFixed(2)}</span>
-      <span>importance {breakdown.importance.toFixed(2)}</span>
-      <span>goal {breakdown.goal_alignment.toFixed(2)}</span>
-      <span>time {breakdown.time_cost.toFixed(2)}</span>
-      <span>balance {breakdown.balance_boost.toFixed(2)}</span>
-      {breakdown.slack_minutes !== null && (
-        <span>slack {breakdown.slack_minutes}m</span>
-      )}
-    </div>
   );
 }
 
@@ -350,7 +318,7 @@ function ConflictList({
             <Badge variant="destructive" className="mr-2">
               {c.kind}
             </Badge>
-            {c.message}
+            {formatMessageDates(c.message)}
           </li>
         ))}
       </ul>
@@ -361,9 +329,11 @@ function ConflictList({
 export function CompleteTaskDialog({
   target,
   onOpenChange,
+  simple = false,
 }: {
   target: { id: number; title: string } | null;
   onOpenChange: (open: boolean) => void;
+  simple?: boolean;
 }) {
   const qc = useQueryClient();
   const [actual, setActual] = useState<string>("");
@@ -388,6 +358,18 @@ export function CompleteTaskDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const submit = () => {
+    if (simple) {
+      mutation.mutate({});
+      return;
+    }
+    const body: CompleteTaskBody = {};
+    if (actual !== "") body.actual_minutes = Number(actual);
+    if (energyBefore !== "") body.energy_before = Number(energyBefore);
+    if (energyAfter !== "") body.energy_after = Number(energyAfter);
+    mutation.mutate(body);
+  };
+
   return (
     <Dialog open={!!target} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -397,59 +379,51 @@ export function CompleteTaskDialog({
         {target && (
           <div className="space-y-4">
             <div className="text-sm">{target.title}</div>
-            <div className="grid gap-3">
-              <div>
-                <Label htmlFor="actual">Actual minutes (optional)</Label>
-                <Input
-                  id="actual"
-                  type="number"
-                  min={0}
-                  value={actual}
-                  onChange={(e) => setActual(e.target.value)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            {!simple && (
+              <div className="grid gap-3">
                 <div>
-                  <Label htmlFor="eb">Energy before (0–1)</Label>
+                  <Label htmlFor="actual">Actual minutes (optional)</Label>
                   <Input
-                    id="eb"
+                    id="actual"
                     type="number"
                     min={0}
-                    max={1}
-                    step={0.1}
-                    value={energyBefore}
-                    onChange={(e) => setEnergyBefore(e.target.value)}
+                    value={actual}
+                    onChange={(e) => setActual(e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="ea">Energy after (0–1)</Label>
-                  <Input
-                    id="ea"
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    value={energyAfter}
-                    onChange={(e) => setEnergyAfter(e.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="eb">Energy before (0–1)</Label>
+                    <Input
+                      id="eb"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={energyBefore}
+                      onChange={(e) => setEnergyBefore(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ea">Energy after (0–1)</Label>
+                    <Input
+                      id="ea"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={energyAfter}
+                      onChange={(e) => setEnergyAfter(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
             <DialogFooter>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button
-                onClick={() => {
-                  const body: CompleteTaskBody = {};
-                  if (actual !== "") body.actual_minutes = Number(actual);
-                  if (energyBefore !== "")
-                    body.energy_before = Number(energyBefore);
-                  if (energyAfter !== "") body.energy_after = Number(energyAfter);
-                  mutation.mutate(body);
-                }}
-                disabled={mutation.isPending}
-              >
+              <Button onClick={submit} disabled={mutation.isPending}>
                 {mutation.isPending ? "Saving…" : "Complete"}
               </Button>
             </DialogFooter>
